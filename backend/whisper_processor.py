@@ -1,5 +1,5 @@
 from pathlib import Path
-import whisper
+import faster_whisper as whisper
 
 def transcribe_audio(audio_path, out_txt_path, model_name="base"):
     """Transcribe audio using OpenAI Whisper (openai-whisper package).
