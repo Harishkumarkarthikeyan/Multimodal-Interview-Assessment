@@ -1,5 +1,6 @@
 import argparse
 import logging
+import os
 from pathlib import Path
 import sys
 
@@ -10,7 +11,6 @@ try:
 	from .whisper_processor import transcribe_audio
 	from .mediapipe_processor import extract_landmarks
 	from .librosa_processor import extract_audio_features
-	from .deepface_processor import analyze_emotions
 except Exception:
 	# Running as a script: ensure the `backend` folder (this file's dir) is on sys.path
 	package_dir = Path(__file__).resolve().parent
@@ -20,7 +20,6 @@ except Exception:
 	from whisper_processor import transcribe_audio
 	from mediapipe_processor import extract_landmarks
 	from librosa_processor import extract_audio_features
-	from deepface_processor import analyze_emotions
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -37,7 +36,7 @@ def find_videos(path, recursive=True):
 				videos.append(f)
 	return videos
 
-def process_video(video_path):
+def process_video(video_path, holistic_model_path=None):
 	video_path = Path(video_path)
 	logging.info(f"Processing video: {video_path}")
 	base = video_path.with_suffix("")
@@ -62,7 +61,7 @@ def process_video(video_path):
 
 	try:
 		logging.info("Extracting landmarks with MediaPipe...")
-		extract_landmarks(video_path, landmarks_path)
+		extract_landmarks(video_path, landmarks_path, holistic_model_path=holistic_model_path)
 	except Exception as e:
 		logging.exception("Landmarks extraction failed: %s", e)
 
@@ -71,13 +70,6 @@ def process_video(video_path):
 		extract_audio_features(out_audio, audio_features_path)
 	except Exception as e:
 		logging.exception("Audio feature extraction failed: %s", e)
-
-	try:
-		logging.info("Analyzing emotions with DeepFace...")
-		analyze_emotions(video_path, emotions_path)
-	except Exception as e:
-		logging.exception("Emotion analysis failed: %s", e)
-
 	logging.info("Finished processing %s", video_path)
 
 
@@ -85,7 +77,15 @@ def main():
 	parser = argparse.ArgumentParser(description="Run multimodal pipeline on videos")
 	parser.add_argument("input", nargs="?", help="Video file or directory to process")
 	parser.add_argument("--recursive", action="store_true", help="Recursively search directories")
+	parser.add_argument(
+		"--holistic-model-path",
+		help="Path to a MediaPipe holistic task model file (.task or .tflite) when using MediaPipe 1.x without mp.solutions",
+	)
 	args = parser.parse_args()
+
+	holistic_model_path = args.holistic_model_path or os.getenv("MEDIAPIPE_HOLISTIC_MODEL_PATH")
+	if holistic_model_path:
+		logging.info("Using MediaPipe holistic model path: %s", holistic_model_path)
 
 	if args.input:
 		target = Path(args.input)
@@ -105,7 +105,7 @@ def main():
 		sys.exit(0)
 
 	for v in videos:
-		process_video(v)
+		process_video(v, holistic_model_path=holistic_model_path)
 
 
 if __name__ == "__main__":
