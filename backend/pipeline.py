@@ -1,113 +1,150 @@
 import argparse
 import logging
-import os
-from pathlib import Path
 import sys
+from pathlib import Path
 
-# Import local processors robustly so the file can be run as a module
-# (`python -m backend.pipeline`) or directly as a script
 try:
-	from . import utils
-	from .whisper_processor import transcribe_audio
-	from .mediapipe_processor import extract_landmarks
-	from .librosa_processor import extract_audio_features
-except Exception:
-	# Running as a script: ensure the `backend` folder (this file's dir) is on sys.path
-	package_dir = Path(__file__).resolve().parent
-	if str(package_dir) not in sys.path:
-		sys.path.insert(0, str(package_dir))
-	import utils
-	from whisper_processor import transcribe_audio
-	from mediapipe_processor import extract_landmarks
-	from librosa_processor import extract_audio_features
+    from . import utils
+    from .assessment import build_assessment
+    from .librosa_processor import extract_audio_features
+    from .mediapipe_processor import extract_landmarks
+    from .whisper_processor import transcribe_audio
+except ImportError:
+    package_dir = Path(__file__).resolve().parent
+    if str(package_dir) not in sys.path:
+        sys.path.insert(0, str(package_dir))
+
+    import utils
+    from assessment import build_assessment
+    from librosa_processor import extract_audio_features
+    from mediapipe_processor import extract_landmarks
+    from whisper_processor import transcribe_audio
+
+
+VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv"}
 
 def find_videos(path, recursive=True):
-	p = Path(path)
-	if p.is_file() and p.suffix.lower() in VIDEO_EXTS:
-		return [p]
-	videos = []
-	if p.is_dir():
-		for f in p.rglob("*") if recursive else p.iterdir():
-			if f.suffix.lower() in VIDEO_EXTS:
-				videos.append(f)
-	return videos
+    target = Path(path)
+    if target.is_file() and target.suffix.lower() in VIDEO_EXTS:
+        return [target]
 
-def process_video(video_path, holistic_model_path=None):
-	video_path = Path(video_path)
-	logging.info(f"Processing video: {video_path}")
-	base = video_path.with_suffix("")
-	out_audio = base.with_suffix(".wav")
-	transcript_path = base.parent / (base.name + "_transcript.txt")
-	landmarks_path = base.parent / (base.name + "_landmarks.npy")
-	audio_features_path = base.parent / (base.name + "_audio_features.npy")
-	emotions_path = base.parent / (base.name + "_emotions.json")
+    if not target.is_dir():
+        return []
 
-	try:
-		logging.info("Extracting audio...")
-		utils.extract_audio(video_path, out_audio)
-	except Exception as e:
-		logging.exception("Audio extraction failed: %s", e)
-		return
+    iterator = target.rglob("*") if recursive else target.iterdir()
+    return sorted(file for file in iterator if file.suffix.lower() in VIDEO_EXTS)
 
-	try:
-		logging.info("Transcribing audio with Whisper...")
-		transcribe_audio(out_audio, transcript_path)
-	except Exception as e:
-		logging.exception("Transcription failed: %s", e)
 
-	try:
-		logging.info("Extracting landmarks with MediaPipe...")
-		extract_landmarks(video_path, landmarks_path, holistic_model_path=holistic_model_path)
-	except Exception as e:
-		logging.exception("Landmarks extraction failed: %s", e)
+def output_paths(video_path, output_dir=None):
+    video_path = Path(video_path)
+    base_dir = Path(output_dir) if output_dir else video_path.parent
+    base_name = video_path.stem
+    return {
+        "audio": base_dir / f"{base_name}.wav",
+        "transcript": base_dir / f"{base_name}_transcript.txt",
+        "landmarks": base_dir / f"{base_name}_landmarks.npy",
+        "audio_features": base_dir / f"{base_name}_audio_features.npy",
+        "assessment": base_dir / f"{base_name}_assessment.json",
+    }
 
-	try:
-		logging.info("Extracting audio features with Librosa...")
-		extract_audio_features(out_audio, audio_features_path)
-	except Exception as e:
-		logging.exception("Audio feature extraction failed: %s", e)
-	logging.info("Finished processing %s", video_path)
+
+def process_video(
+    video_path,
+    output_dir=None,
+    whisper_model="base",
+    language=None,
+    landmark_stride=2,
+    max_frames=None,
+):
+    video_path = Path(video_path)
+    paths = output_paths(video_path, output_dir=output_dir)
+
+    logging.info("Processing video: %s", video_path)
+
+    logging.info("Extracting audio")
+    utils.extract_audio(video_path, paths["audio"])
+
+    logging.info("Transcribing audio with Whisper model '%s'", whisper_model)
+    transcribe_audio(
+        paths["audio"],
+        paths["transcript"],
+        model_name=whisper_model,
+        language=language,
+    )
+
+    logging.info("Extracting MediaPipe landmarks")
+    extract_landmarks(
+        video_path,
+        paths["landmarks"],
+        stride=landmark_stride,
+        max_frames=max_frames,
+    )
+
+    logging.info("Extracting Librosa audio features")
+    extract_audio_features(paths["audio"], paths["audio_features"])
+
+    logging.info("Building assessment report")
+    report = build_assessment(
+        video_path,
+        paths["transcript"],
+        paths["audio_features"],
+        paths["landmarks"],
+        paths["assessment"],
+    )
+
+    logging.info("Assessment saved to %s", paths["assessment"])
+    return report
+
+
+def default_input_path():
+    repo_root = Path(__file__).resolve().parents[1]
+    for candidate in (
+        repo_root / "data" / "train",
+        repo_root / "data",
+        repo_root / "Data" / "Train",
+        repo_root / "Data",
+    ):
+        if candidate.exists():
+            return candidate
+    return repo_root / "data"
 
 
 def main():
-	parser = argparse.ArgumentParser(description="Run multimodal pipeline on videos")
-	parser.add_argument("input", nargs="?", help="Video file or directory to process")
-	parser.add_argument("--recursive", action="store_true", help="Recursively search directories")
-	parser.add_argument(
-		"--holistic-model-path",
-		help="Path to a MediaPipe holistic task model file (.task or .tflite) when using MediaPipe 1.x without mp.solutions",
-	)
-	args = parser.parse_args()
+    parser = argparse.ArgumentParser(description="Run multimodal interview assessment.")
+    parser.add_argument("input", nargs="?", help="Video file or directory to process")
+    parser.add_argument("--output-dir", help="Directory for generated outputs")
+    parser.add_argument("--recursive", action="store_true", help="Search directories recursively")
+    parser.add_argument("--whisper-model", default="base", help="Whisper model name")
+    parser.add_argument("--language", help="Optional Whisper language code, for example en")
+    parser.add_argument("--landmark-stride", type=int, default=2, help="Process every Nth frame")
+    parser.add_argument("--max-frames", type=int, help="Limit sampled frames per video")
+    args = parser.parse_args()
 
-	holistic_model_path = args.holistic_model_path or os.getenv("MEDIAPIPE_HOLISTIC_MODEL_PATH")
-	if holistic_model_path:
-		logging.info("Using MediaPipe holistic model path: %s", holistic_model_path)
+    target = Path(args.input) if args.input else default_input_path()
+    videos = find_videos(target, recursive=args.recursive)
 
-	if args.input:
-		target = Path(args.input)
-	else:
-		# default folder: prefer `data/train` (user-specified), fall back to `Data/Train`
-		repo_root = Path(__file__).resolve().parents[1]
-		candidate = repo_root / "data" / "train"
-		if candidate.exists():
-			target = candidate
-		else:
-			fallback = repo_root / "Data" / "Train"
-			target = fallback if fallback.exists() else candidate
+    if not videos:
+        logging.warning("No videos found at %s", target)
+        return 0
 
-	videos = find_videos(target, recursive=args.recursive)
-	if not videos:
-		logging.warning("No videos found at %s", target)
-		sys.exit(0)
+    for video in videos:
+        try:
+            process_video(
+                video,
+                output_dir=args.output_dir,
+                whisper_model=args.whisper_model,
+                language=args.language,
+                landmark_stride=max(1, args.landmark_stride),
+                max_frames=args.max_frames,
+            )
+        except Exception:
+            logging.exception("Failed to process %s", video)
 
-	for v in videos:
-		process_video(v, holistic_model_path=holistic_model_path)
+    return 0
 
 
 if __name__ == "__main__":
-	main()
-
+    raise SystemExit(main())
