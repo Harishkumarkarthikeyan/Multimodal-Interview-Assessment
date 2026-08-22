@@ -2,6 +2,9 @@ numpy==1.26.4
 scipy
 pandas
 scikit-learn
+fastapi
+uvicorn
+python-multipart
 openai-whisper
 librosa
 soundfile

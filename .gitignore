@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.npm-cache/
+node_modules/
+frontend/node_modules/
+frontend/dist/
+data/uploads/
+data/outputs/
+outputs/
