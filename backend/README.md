@@ -1,31 +1,25 @@
-Multimodal processing pipeline
+# Backend
 
-This `backend` folder contains simple modules and an orchestrator to process video files located in the repository `Data/` directory.
+FastAPI powers the web API and calls the multimodal processing pipeline.
 
-Pipeline steps for each video:
-- Extract audio (FFmpeg required) -> `*_audio.wav`
-- Transcribe audio with Whisper -> `*_transcript.txt`
-- Extract MediaPipe landmarks -> `*_landmarks.npy`
-- Extract audio features with Librosa -> `*_audio_features.npy`
-- Analyze emotions with DeepFace -> `*_emotions.json`
-
-Quick start
-
-1. Install required Python packages (preferably in a virtualenv):
+## Start API
 
 ```bash
-pip install -r requirements.txt
+uvicorn backend.api:app --reload --host 127.0.0.1 --port 8000
 ```
 
-2. Ensure `ffmpeg` is installed and available on PATH.
+## API Routes
 
-3. Run the pipeline on the `Data/` folder (default) or a specific file:
+- `GET /api/health`: server health check
+- `POST /api/analyze`: upload and process an interview video
+- `GET /api/jobs/{job_id}`: poll processing status
+- `GET /api/demo-report`: sample report for presentation
+
+## Pipeline
 
 ```bash
-python -m backend.pipeline --recursive
-python -m backend.pipeline path/to/video.mp4
+python -m backend.pipeline path\to\interview.mp4 --output-dir outputs
 ```
 
-Notes
-- The modules included are lightweight wrappers intended to be a starting point. They assume reasonable system resources.
-- DeepFace and Whisper are computationally heavy; consider using smaller Whisper models or GPU acceleration where available.
+The pipeline extracts audio, transcribes speech, extracts MediaPipe landmarks,
+extracts Librosa audio features, and writes a JSON assessment report.
