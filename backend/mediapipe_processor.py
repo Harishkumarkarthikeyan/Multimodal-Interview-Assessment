@@ -20,8 +20,12 @@ def _append_landmarks(frame_landmarks, landmarks_obj, expected_count):
         frame_landmarks.extend(_empty_points(expected_count))
         return
 
-    for landmark in landmarks_obj.landmark:
+    detected = landmarks_obj.landmark[:expected_count]
+    for landmark in detected:
         frame_landmarks.append((landmark.x, landmark.y, landmark.z))
+
+    if len(detected) < expected_count:
+        frame_landmarks.extend(_empty_points(expected_count - len(detected)))
 
 
 def extract_landmarks(video_path, out_npy_path, max_frames=None, stride=2):
@@ -49,7 +53,7 @@ def extract_landmarks(video_path, out_npy_path, max_frames=None, stride=2):
         static_image_mode=False,
         model_complexity=1,
         smooth_landmarks=True,
-        refine_face_landmarks=True,
+        refine_face_landmarks=False,
     )
 
     try:
